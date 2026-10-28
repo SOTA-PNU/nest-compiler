@@ -1,6 +1,7 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${GLOW_BINARY_DIR}/bundles)
 set(RESNET50_BUNDLE_DIR ${GLOW_BINARY_DIR}/examples/bundles/resnet50)
-set(RESNET50_GLOW_S3 "https://nestc-data-pub.s3.ap-northeast-2.amazonaws.com/models/glow/resnet50")
+# 원래 s3://nestc-data-pub/models/glow/resnet50 에 있던 파일. Release 에는 resnet50_ 접두어를 붙여 올렸다.
+set(RESNET50_GLOW_S3 "${NESTC_MODEL_URL}/resnet50_")
 set(RESNET50_NET_FILES predict_net.pbtxt predict_net.pb init_net.pb)
 set(MODEL_INPUT_NAME "gpu_0/data")
 set(IMAGES ${GLOW_SOURCE_DIR}/tests/images/imagenet)
@@ -94,7 +95,7 @@ foreach(file ${RESNET50_NET_FILES})
     COMMAND
       wget
     ARGS
-      "${RESNET50_GLOW_S3}/${file}" -P ${RESNET50_BUNDLE_DIR}/resnet50 -nc
+      "${RESNET50_GLOW_S3}${file}" -O ${RESNET50_BUNDLE_DIR}/resnet50/${file} -nv
 )
 endforeach()
 add_custom_target(ResNet50BundleNetFiles DEPENDS ${RESNET50_NET_FILES})
