@@ -5,7 +5,7 @@ if(NESTC_WITH_TVM)
             OUTPUT
             ${CMAKE_CURRENT_BINARY_DIR}/inception.onnx
             COMMAND
-            aws s3 cp s3://nestc-data-pub/models/inception_v1.onnx ${CMAKE_CURRENT_BINARY_DIR}/inception.onnx --no-sign-request
+            curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/inception.onnx ${NESTC_MODEL_URL}/inception_v1.onnx
     )
 
     add_custom_target(InceptionRelayBundleONNX

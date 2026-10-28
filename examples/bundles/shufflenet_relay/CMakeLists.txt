@@ -5,7 +5,7 @@ if(NESTC_WITH_TVM)
             OUTPUT
             ${CMAKE_CURRENT_BINARY_DIR}/shufflenet.onnx
             COMMAND
-            aws s3 cp s3://nestc-data-pub/models/shufflenet.onnx ${CMAKE_CURRENT_BINARY_DIR}/shufflenet.onnx --no-sign-request
+            curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/shufflenet.onnx ${NESTC_MODEL_URL}/shufflenet.onnx
     )
 
     add_custom_target(ShufflenetBundleRelayONNX

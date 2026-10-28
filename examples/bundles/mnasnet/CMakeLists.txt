@@ -16,7 +16,7 @@ add_custom_command(
         OUTPUT
         ${CMAKE_CURRENT_BINARY_DIR}/mnasnet.onnx
         COMMAND
-        aws s3 cp s3://nestc-data-pub/models/mnasnet.onnx ${CMAKE_CURRENT_BINARY_DIR}/mnasnet.onnx --no-sign-request
+        curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/mnasnet.onnx ${NESTC_MODEL_URL}/mnasnet.onnx
 )
 
 add_custom_target(MNasNetONNX

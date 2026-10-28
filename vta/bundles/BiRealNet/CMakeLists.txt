@@ -4,7 +4,7 @@ add_custom_command(
         OUTPUT
         ${CMAKE_CURRENT_BINARY_DIR}/BirealNet.onnx
         COMMAND
-        aws s3 cp s3://nestc-data-pub/VTABundleTests/BiRealNet/BirealNet.onnx ${CMAKE_CURRENT_BINARY_DIR}/BirealNet.onnx --no-sign-request
+        ${CMAKE_COMMAND} -E copy ${NESTC_ROOT_DIR}/vta/bundles/BiRealNet/BirealNet.onnx ${CMAKE_CURRENT_BINARY_DIR}/BirealNet.onnx
         )
 
 if(NOT NESTC_USE_PRECOMPILED_BUNDLE)

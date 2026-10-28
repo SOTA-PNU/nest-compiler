@@ -16,7 +16,7 @@ add_custom_command(
         OUTPUT
         ${CMAKE_CURRENT_BINARY_DIR}/densenet.onnx
         COMMAND
-        aws s3 cp s3://nestc-data-pub/models/densenet-9.onnx ${CMAKE_CURRENT_BINARY_DIR}/densenet.onnx --no-sign-request
+        curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/densenet.onnx ${NESTC_MODEL_URL}/densenet-9.onnx
 )
 
 add_custom_target(DenseNetBundleONNX

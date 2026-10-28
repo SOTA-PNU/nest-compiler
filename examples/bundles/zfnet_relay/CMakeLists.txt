@@ -5,7 +5,7 @@ if(NESTC_WITH_TVM)
             OUTPUT
             ${CMAKE_CURRENT_BINARY_DIR}/zfnet.onnx
             COMMAND
-            aws s3 cp s3://nestc-data-pub/models/zfnet512-9.onnx ${CMAKE_CURRENT_BINARY_DIR}/zfnet.onnx --no-sign-request
+            curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/zfnet.onnx ${NESTC_MODEL_URL}/zfnet512-9.onnx
     )
 
     add_custom_target(ZfNetRelayBundleONNX

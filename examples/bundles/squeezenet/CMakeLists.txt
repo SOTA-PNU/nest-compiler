@@ -14,7 +14,7 @@ add_custom_command(
         OUTPUT
         ${CMAKE_CURRENT_BINARY_DIR}/squeezenet.onnx
         COMMAND
-        aws s3 cp s3://nestc-data-pub/models/squeezenet.onnx ${CMAKE_CURRENT_BINARY_DIR}/squeezenet.onnx --no-sign-request
+        curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/squeezenet.onnx ${NESTC_MODEL_URL}/squeezenet.onnx
 )
 
 add_custom_target(SqueezeNetBundleONNX

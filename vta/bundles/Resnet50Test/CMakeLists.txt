@@ -2,7 +2,7 @@ add_custom_command(
         OUTPUT
         ${CMAKE_CURRENT_BINARY_DIR}/resnet50.onnx
         COMMAND
-        aws s3 cp s3://nestc-data-pub/VTABundleTests/Resnet50/resnet50.onnx ${CMAKE_CURRENT_BINARY_DIR}/resnet50.onnx --no-sign-request
+        curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/resnet50.onnx ${NESTC_MODEL_URL}/resnet50.onnx
 )
 
 add_custom_command(
