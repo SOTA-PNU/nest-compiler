@@ -89,6 +89,13 @@ jobs:
     continue-on-error: ${{ matrix.allow_failure || false }}
 
     steps:
+      # 이전 job 의 '정리' 단계가 작업 디렉터리 소유권을 러너 계정에 돌려주므로,
+      # root 로 도는 컨테이너의 git 은 이를 남의 저장소로 보고 거부한다(dubious ownership).
+      # checkout 액션은 최상위 디렉터리만 예외로 등록하고 submodule 은 빠뜨린다.
+      # 컨테이너는 job 마다 새로 뜨므로 이 설정은 이 job 안에서만 유효하다.
+      - name: git safe.directory
+        run: git config --global --add safe.directory '*'
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -162,6 +169,13 @@ jobs:
     continue-on-error: true
 
     steps:
+      # 이전 job 의 '정리' 단계가 작업 디렉터리 소유권을 러너 계정에 돌려주므로,
+      # root 로 도는 컨테이너의 git 은 이를 남의 저장소로 보고 거부한다(dubious ownership).
+      # checkout 액션은 최상위 디렉터리만 예외로 등록하고 submodule 은 빠뜨린다.
+      # 컨테이너는 job 마다 새로 뜨므로 이 설정은 이 job 안에서만 유효하다.
+      - name: git safe.directory
+        run: git config --global --add safe.directory '*'
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
