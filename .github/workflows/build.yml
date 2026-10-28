@@ -46,7 +46,7 @@ jobs:
     runs-on: [self-hosted, linux, X64, nestc]
     container:
       image: onesai1/nest-compiler-sdk:1.0.0
-    timeout-minutes: 300
+    timeout-minutes: 480
 
     strategy:
       fail-fast: false
@@ -99,6 +99,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # 공용 서버다. 부하가 낮아질 때까지 기다렸다가 빌드한다.
+      - name: 서버 부하 대기
+        env:
+          MAX_LOAD: ${{ vars.NESTC_MAX_LOAD }}
+          MIN_MEM_GB: ${{ vars.NESTC_MIN_MEM_GB }}
+          MAX_WAIT_MIN: ${{ vars.NESTC_MAX_WAIT_MIN }}
+        run: .github/scripts/wait-for-idle.sh
 
       - name: 설정
         run: |
@@ -165,7 +173,7 @@ jobs:
     runs-on: [self-hosted, linux, X64, nestc]
     container:
       image: onesai1/nest-compiler-sdk:1.0.0
-    timeout-minutes: 480
+    timeout-minutes: 660
     continue-on-error: true
 
     steps:
@@ -179,6 +187,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      # 공용 서버다. 부하가 낮아질 때까지 기다렸다가 빌드한다.
+      - name: 서버 부하 대기
+        env:
+          MAX_LOAD: ${{ vars.NESTC_MAX_LOAD }}
+          MIN_MEM_GB: ${{ vars.NESTC_MIN_MEM_GB }}
+          MAX_WAIT_MIN: ${{ vars.NESTC_MAX_WAIT_MIN }}
+        run: .github/scripts/wait-for-idle.sh
 
       - name: 설정 / 빌드 / 테스트
         run: |
