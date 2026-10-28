@@ -92,6 +92,8 @@ foreach(file ${LENET_MNIST_NET_FILES})
     OUTPUT
       ${file}
     COMMAND
+      ${CMAKE_COMMAND} -E make_directory ${LENET_MNIST_BUNDLE_DIR}/lenet_mnist
+    COMMAND
       wget
     ARGS
       "${LENET_MNIST_GLOW_S3}${file}" -O ${LENET_MNIST_BUNDLE_DIR}/lenet_mnist/${file} -nv

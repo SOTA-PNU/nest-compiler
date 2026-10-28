@@ -93,6 +93,8 @@ foreach(file ${RESNET50_NET_FILES})
     OUTPUT
       ${file}
     COMMAND
+      ${CMAKE_COMMAND} -E make_directory ${RESNET50_BUNDLE_DIR}/resnet50
+    COMMAND
       wget
     ARGS
       "${RESNET50_GLOW_S3}${file}" -O ${RESNET50_BUNDLE_DIR}/resnet50/${file} -nv
