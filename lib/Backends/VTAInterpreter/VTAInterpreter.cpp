@@ -17,6 +17,7 @@
 
 #include "VTAInterpreter.h"
 #include "VTAInterpreterFunction.h"
+#include "../VTACommon/VTARequantRounding.h"
 
 #include "glow/Backend/BackendUtils.h"
 #include "glow/CodeGen/MemoryAllocator.h"
@@ -1282,6 +1283,8 @@ Expected<bool> VTAInterpreter::transformPostLowering(
     } else if (auto *rowwiseFC =
                    llvm::dyn_cast<RowwiseQuantizedFullyConnectedNode>(&node)) {
       changed |= quantizeRQFCFloatBias(F, *rowwiseFC);
+    } else if (auto *CN = llvm::dyn_cast<ConvolutionNode>(&node)) {
+      changed |= foldVTARequantRounding(F, *CN);
     }
   }
   return changed;

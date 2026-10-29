@@ -19,6 +19,7 @@
 #include "VTAFunction.h"
 
 #include "VTACodeGen/VTASaver.h"
+#include "../VTACommon/VTARequantRounding.h"
 #include "glow/Backend/BackendUtils.h"
 #include "glow/CodeGen/MemoryAllocator.h"
 #include "glow/Flags/Flags.h"
@@ -623,6 +624,8 @@ VTA::transformPostLowering(Function *F, CompilationContext &cctx,
     } else if (auto *rowwiseFC =
                    llvm::dyn_cast<RowwiseQuantizedFullyConnectedNode>(&node)) {
       changed |= quantizeRQFCFloatBias(F, *rowwiseFC);
+    } else if (auto *CN = llvm::dyn_cast<ConvolutionNode>(&node)) {
+      changed |= foldVTARequantRounding(F, *CN);
     }
 #ifdef NESTC_EVTA_GRAPH_OPT
     // Try to replace the generic convolution with vta-optimized version (6dim).
