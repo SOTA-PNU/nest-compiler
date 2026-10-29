@@ -36,6 +36,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(NESTC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+
+# 모델·데이터 파일 위치. 예전 s3://nestc-data-pub 버킷이 사라져 GitHub Release 로 옮겼다.
+# 사내 미러 등 다른 곳에서 받으려면 -DNESTC_MODEL_URL=<url> 로 덮어쓴다.
+set(NESTC_MODEL_URL "https://github.com/SOTA-PNU/nest-compiler/releases/download/models-v1"
+    CACHE STRING "Base URL for model and data files used by bundles and tests")
 set(NESTC_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
 if(EXISTS ${NESTC_ROOT_DIR}/glow/tools/loader/Loader.h)

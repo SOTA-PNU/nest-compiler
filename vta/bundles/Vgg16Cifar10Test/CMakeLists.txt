@@ -7,7 +7,7 @@ add_custom_command(
         COMMAND
         mkdir -p ${NESTC_BINARY_DIR}/models
         COMMAND
-        aws s3 cp s3://nestc-data-pub/models/vgg16_cifar10.onnx ${CMAKE_CURRENT_BINARY_DIR}/vgg16_cifar10.onnx --no-sign-request
+        ${CMAKE_COMMAND} -E copy ${NESTC_ROOT_DIR}/examples/bundles/vgg16_cifar10/vgg16.onnx ${CMAKE_CURRENT_BINARY_DIR}/vgg16_cifar10.onnx
 )
 
 if(NOT NESTC_USE_PRECOMPILED_BUNDLE)

@@ -26,7 +26,7 @@ add_custom_command(
         OUTPUT
         ${CMAKE_CURRENT_BINARY_DIR}/mxnet_exported_resnet18_calib_1.yaml
         COMMAND
-        aws s3 cp s3://nestc-data-pub/VTABundleTests/Resnet18/mxnet_exported_resnet18_calib_1.yaml ${CMAKE_CURRENT_BINARY_DIR}/mxnet_exported_resnet18_calib_1.yaml --no-sign-request
+        curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/mxnet_exported_resnet18_calib_1.yaml ${NESTC_MODEL_URL}/mxnet_exported_resnet18_calib_1.yaml
 )
 
 add_custom_target(NESTVTAImageclassifierResnet18ONNX

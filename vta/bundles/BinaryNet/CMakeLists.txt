@@ -5,9 +5,9 @@ add_custom_command(
         ${CMAKE_CURRENT_BINARY_DIR}/binarynet.onnx
         ${CMAKE_CURRENT_BINARY_DIR}/cat_3.png
         COMMAND
-        aws s3 cp s3://nestc-data-pub/VTABundleTests/BinaryNet/binarynet.onnx ${CMAKE_CURRENT_BINARY_DIR}/binarynet.onnx --no-sign-request
+        ${CMAKE_COMMAND} -E copy ${NESTC_ROOT_DIR}/vta/bundles/BinaryNet/binarynet.onnx ${CMAKE_CURRENT_BINARY_DIR}/binarynet.onnx
         COMMAND
-        aws s3 cp s3://nestc-data-pub/VTABundleTests/BinaryNet/cat_3.png ${CMAKE_CURRENT_BINARY_DIR}/cat_3.png --no-sign-request
+        ${CMAKE_COMMAND} -E copy ${NESTC_ROOT_DIR}/vta/bundles/BinaryNet/cat_3.png ${CMAKE_CURRENT_BINARY_DIR}/cat_3.png
         )
 
 if(NOT NESTC_USE_PRECOMPILED_BUNDLE)

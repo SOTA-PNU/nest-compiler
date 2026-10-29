@@ -21,7 +21,7 @@ add_custom_command(
         OUTPUT
         ${CMAKE_CURRENT_BINARY_DIR}/resnet18v2.onnx
         COMMAND
-        aws s3 cp s3://nestc-data-pub/models/resnet18v2.onnx ${CMAKE_CURRENT_BINARY_DIR}/resnet18v2.onnx --no-sign-request
+        curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/resnet18v2.onnx ${NESTC_MODEL_URL}/resnet18v2.onnx
 )
 
 add_custom_target(ResNet18BundleONNX

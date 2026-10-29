@@ -1,6 +1,7 @@
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${GLOW_BINARY_DIR}/bundles)
 set(LENET_MNIST_BUNDLE_DIR ${GLOW_BINARY_DIR}/examples/bundles/lenet_mnist)
-set(LENET_MNIST_GLOW_S3 "https://nestc-data-pub.s3.ap-northeast-2.amazonaws.com/models/glow/lenet_mnist")
+# 원래 s3://nestc-data-pub/models/glow/lenet_mnist 에 있던 파일. Release 에는 lenet_mnist_ 접두어를 붙여 올렸다.
+set(LENET_MNIST_GLOW_S3 "${NESTC_MODEL_URL}/lenet_mnist_")
 set(LENET_MNIST_NET_FILES predict_net.pbtxt predict_net.pb init_net.pb)
 set(MODEL_INPUT_NAME "data")
 set(IMAGES ${GLOW_SOURCE_DIR}/tests/images/mnist)
@@ -91,9 +92,11 @@ foreach(file ${LENET_MNIST_NET_FILES})
     OUTPUT
       ${file}
     COMMAND
+      ${CMAKE_COMMAND} -E make_directory ${LENET_MNIST_BUNDLE_DIR}/lenet_mnist
+    COMMAND
       wget
     ARGS
-      "${LENET_MNIST_GLOW_S3}/${file}" -P ${LENET_MNIST_BUNDLE_DIR}/lenet_mnist -nc
+      "${LENET_MNIST_GLOW_S3}${file}" -O ${LENET_MNIST_BUNDLE_DIR}/lenet_mnist/${file} -nv
 )
 endforeach()
 add_custom_target(LeNetMnistBundleNetFiles DEPENDS ${LENET_MNIST_NET_FILES})

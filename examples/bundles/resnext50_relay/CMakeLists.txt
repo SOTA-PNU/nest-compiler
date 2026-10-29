@@ -5,7 +5,7 @@ if(NESTC_WITH_TVM)
             OUTPUT
             ${CMAKE_CURRENT_BINARY_DIR}/resnext50.onnx
             COMMAND
-            aws s3 cp s3://nestc-data-pub/models/resnext50.onnx ${CMAKE_CURRENT_BINARY_DIR}/resnext50.onnx --no-sign-request
+            curl -fsSL --retry 3 -o ${CMAKE_CURRENT_BINARY_DIR}/resnext50.onnx ${NESTC_MODEL_URL}/resnext50.onnx
     )
 
     add_custom_target(ResNext50RelayBundleONNX
