@@ -359,6 +359,30 @@ static int dumpInferenceResults(const BundleConfig &config,
   }
   printf("Result: %u\n", maxIdx);
   printf("Confidence: %f\n", maxValue);
+
+  // Top-5, for comparing the VTA/CPU split against the float model.
+  int top[5] = {-1, -1, -1, -1, -1};
+  for (int k = 0; k < 5; ++k) {
+    for (int i = 0; i < size; ++i) {
+      bool taken = false;
+      for (int j = 0; j < k; ++j) {
+        taken |= (top[j] == i);
+      }
+      if (!taken && (top[k] < 0 || softmax_result[i] > softmax_result[top[k]])) {
+        top[k] = i;
+      }
+    }
+    printf("Top%d: %d %f\n", k + 1, top[k], softmax_result[top[k]]);
+  }
+
+  // REPVGG_DUMP_LOGITS=<file> writes the raw float logits for offline checks.
+  if (const char *dumpPath = getenv("REPVGG_DUMP_LOGITS")) {
+    FILE *f = fopen(dumpPath, "wb");
+    if (f) {
+      fwrite(results, sizeof(float), size, f);
+      fclose(f);
+    }
+  }
   return maxIdx;
 }
 
