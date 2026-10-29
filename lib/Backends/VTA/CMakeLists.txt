@@ -35,6 +35,7 @@ target_link_libraries(VTA
                         QuantizationBase
                         Runtime
         VTABundle
+        VTACommon
         vta_runtime
         )
 

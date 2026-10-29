@@ -18,7 +18,8 @@ target_link_libraries(VTAInterpreter
                         IROptimizerPipeline
                         GraphOptimizerPipeline
                         QuantizationBase
-                        Runtime)
+                        Runtime
+                        VTACommon)
 
 set(linked_backends ${linked_backends} VTAInterpreter PARENT_SCOPE)
 
