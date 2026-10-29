@@ -4,5 +4,6 @@ ResNet18PartitionBundle
 MobileNetBundle
 ShufflenetBundle
 RepVGGA0Bundle
+SSD300VGG16Bundle
 vtaRepVGGA0Bundle
 vtaRepVGGA0AllVTABundle
