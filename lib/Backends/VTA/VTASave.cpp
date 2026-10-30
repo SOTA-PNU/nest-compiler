@@ -483,7 +483,9 @@ void saveNonVTAConvolutionInst(
     }
   }
 
-  assert(biasScale == inScale * filterScale);
+  // The bias scale may differ from inScale * filterScale (e.g. SSD300-VGG16
+  // extra.0.1 without NESTC_EVTA_GRAPH_OPT); nonvtaconvolution then rescales
+  // the bias on the CPU.
 
   auto biasSte = addConstantSymbolEntry(bias, ctx);
 
