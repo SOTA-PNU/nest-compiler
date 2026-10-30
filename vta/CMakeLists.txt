@@ -7,6 +7,8 @@ if(NOT NESTC_BNN)
     add_subdirectory(tests)
     if(NOT NESTC_USE_PRECOMPILED_EVTA_LIBRARY)
         add_nestc_test(name VTABackendSimulatorTest ${NESTC_BINARY_DIR}/tests/VTABackendSimulatorTest --gtest_output=xml:VTABackendSimulatorTest.xml)
+        # vtalib operators and convolution tiling on the simulator.
+        add_nestc_test(NAME VTABundleOpsTest COMMAND ${NESTC_BINARY_DIR}/tests/VTABundleOpsTest --gtest_output=xml:VTABundleOpsTest.xml)
     endif()
 endif()
 

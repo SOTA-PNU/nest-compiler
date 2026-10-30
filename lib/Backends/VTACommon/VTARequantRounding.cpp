@@ -19,6 +19,7 @@
 #include "llvm/Support/CommandLine.h"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 
 using namespace glow;
@@ -49,9 +50,11 @@ bool glow::foldVTARequantRounding(Function *F, ConvolutionNode &CN) {
   }
 
   // Same conditions as the VTA path in VTAInterpreterNodes.cpp and
-  // VTASave.cpp (NHWC input, group 1, channels in blocks of 16, zero offsets,
-  // power-of-2 rescale). Scales are compared exactly the way they are there.
-  if (CN.getGroup() != 1 || inTy->dims()[3] % 16 != 0 ||
+  // VTASave.cpp (NHWC input, group 1, no dilation, channels in blocks of 16,
+  // zero offsets, power-of-2 rescale). Scales are compared exactly the way
+  // they are there.
+  if (CN.getGroup() != 1 || CN.getDilation()[0] != 1 ||
+      CN.getDilation()[1] != 1 || inTy->dims()[3] % 16 != 0 ||
       outTy->dims()[3] % 16 != 0) {
     return false;
   }
@@ -94,5 +97,43 @@ bool glow::foldVTARequantRounding(Function *F, ConvolutionNode &CN) {
     H.raw(i) = int32_t(std::min<int64_t>(v, std::numeric_limits<int32_t>::max()));
   }
   CN.setNthInput(ConvolutionNode::BiasIdx, rounded);
+  return true;
+}
+
+bool glow::alignVTAConvBiasScale(Function *F, ConvolutionNode &CN) {
+  TypeRef inTy = CN.getInput().getType();
+  TypeRef filterTy = CN.getFilter().getType();
+  TypeRef biasTy = CN.getBias().getType();
+  if (inTy->getElementType() != ElemKind::Int8QTy ||
+      filterTy->getElementType() != ElemKind::Int8QTy ||
+      biasTy->getElementType() != ElemKind::Int32QTy ||
+      biasTy->getOffset() != 0) {
+    return false;
+  }
+  // The same product quantization uses (specializeBiasQuantizationParams).
+  float matMulScale = inTy->getScale() * filterTy->getScale();
+  if (biasTy->getScale() == matMulScale) {
+    return false;
+  }
+  auto *biasC = llvm::dyn_cast<Constant>(CN.getBias().getNode());
+  if (!biasC) {
+    return false;
+  }
+
+  // Work on a copy: the bias constant may be shared with other nodes.
+  TypeRef newTy = F->getParent()->uniqueType(ElemKind::Int32QTy, biasTy->dims(),
+                                             matMulScale, 0);
+  Constant *aligned = F->getParent()->createConstant(
+      newTy, biasC->getName().str() + "_vta_bias");
+  auto src = biasC->getPayload().getHandle<int32_t>();
+  auto dst = aligned->getPayloadMutable().getHandle<int32_t>();
+  const double ratio = double(biasTy->getScale()) / matMulScale;
+  for (dim_t i = 0, e = src.size(); i < e; i++) {
+    double v = std::round(src.raw(i) * ratio);
+    v = std::min<double>(v, std::numeric_limits<int32_t>::max());
+    v = std::max<double>(v, std::numeric_limits<int32_t>::min());
+    dst.raw(i) = int32_t(v);
+  }
+  CN.setNthInput(ConvolutionNode::BiasIdx, aligned);
   return true;
 }

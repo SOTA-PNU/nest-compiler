@@ -1284,6 +1284,7 @@ Expected<bool> VTAInterpreter::transformPostLowering(
                    llvm::dyn_cast<RowwiseQuantizedFullyConnectedNode>(&node)) {
       changed |= quantizeRQFCFloatBias(F, *rowwiseFC);
     } else if (auto *CN = llvm::dyn_cast<ConvolutionNode>(&node)) {
+      changed |= alignVTAConvBiasScale(F, *CN);
       changed |= foldVTARequantRounding(F, *CN);
     }
   }

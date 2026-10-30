@@ -1301,7 +1301,10 @@ void BoundVTAInterpreterFunction::fwdConvolutionInst(const ConvolutionInst *I) {
     int32_t inOffset = inTy->getOffset();
     int32_t filterOffset = filterTy->getOffset();
     int32_t biasOffset = biasTy->getOffset();
+    // Dilated convolutions run on the CPU in the VTA bundle (VTASave.cpp).
+    bool noDilation = I->getDilation()[0] == 1 && I->getDilation()[1] == 1;
     if (idim.c % 16 == 0 && odim.c % 16 == 0 && tempScale == scale &&
+        noDilation &&
         outOffset == 0 && inOffset == 0 && biasScale == matMulScale &&
         filterOffset == 0 && biasOffset == 0) {
       llvm::outs() << "VTA Conv"
