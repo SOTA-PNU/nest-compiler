@@ -24,6 +24,9 @@
 #include <vector>
 
 #include "ssd300_vgg16.h"
+#ifdef SSD_VTA_BUNDLE
+#include "VTARuntime.h"
+#endif
 
 /// Runs the SSD300-VGG16 object detector (torchvision ssd300_vgg16, COCO).
 ///
@@ -38,6 +41,9 @@
 ///   With an expected detection, returns 0 only if a box of that COCO label
 ///   with score >= 0.5 overlaps it with IoU >= 0.5.
 ///   SSD_DUMP_OUTPUT=<file> writes the raw [8732, 95] network output.
+///
+/// The same driver runs the VTA bundle (vta/bundles/SSD300VGG16Test) when
+/// built with SSD_VTA_BUNDLE, which adds the VTA runtime setup around the call.
 
 #define INPUT_SIZE 300
 #define NUM_ANCHORS 8732
@@ -374,6 +380,10 @@ int main(int argc, char **argv) {
   preprocess(rgb, width, height,
              reinterpret_cast<float *>(mutableWeights + input.offset));
 
+#ifdef SSD_VTA_BUNDLE
+  initVTARuntime();
+  ssd300_vgg16_load_module(constantWeights);
+#endif
   int errCode = ssd300_vgg16(constantWeights, mutableWeights, activations);
   if (errCode != GLOW_SUCCESS) {
     fprintf(stderr, "Error running bundle: error code %d\n", errCode);
@@ -415,6 +425,10 @@ int main(int argc, char **argv) {
     ret = best >= 0.5f ? 0 : 1;
   }
 
+#ifdef SSD_VTA_BUNDLE
+  ssd300_vgg16_destroy_module();
+  destroyVTARuntime();
+#endif
   free(activations);
   free(mutableWeights);
   free(constantWeights);
