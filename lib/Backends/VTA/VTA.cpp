@@ -625,6 +625,7 @@ VTA::transformPostLowering(Function *F, CompilationContext &cctx,
                    llvm::dyn_cast<RowwiseQuantizedFullyConnectedNode>(&node)) {
       changed |= quantizeRQFCFloatBias(F, *rowwiseFC);
     } else if (auto *CN = llvm::dyn_cast<ConvolutionNode>(&node)) {
+      changed |= alignVTAConvBiasScale(F, *CN);
       changed |= foldVTARequantRounding(F, *CN);
     }
 #ifdef NESTC_EVTA_GRAPH_OPT

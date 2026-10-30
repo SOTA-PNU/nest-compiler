@@ -30,6 +30,15 @@ class ConvolutionNode;
 /// already rounds. \returns true if \p CN was changed.
 bool foldVTARequantRounding(Function *F, ConvolutionNode &CN);
 
+/// VTA adds the int32 bias straight into the accumulator, so the bias scale
+/// must equal inputScale * filterScale. Quantization makes it so, but graph
+/// optimizations can break it afterwards: sinking a RescaleQuantized into the
+/// convolution input (Convolution(Rescale(X), F, B) -> Convolution(X, F, B))
+/// changes the input scale and keeps the bias. Requantizes the int32 bias
+/// constant of \p CN to inputScale * filterScale in that case. Call before
+/// foldVTARequantRounding. \returns true if \p CN was changed.
+bool alignVTAConvBiasScale(Function *F, ConvolutionNode &CN);
+
 } // namespace glow
 
 #endif // NESTC_BACKENDS_VTACOMMON_VTAREQUANTROUNDING_H

@@ -483,9 +483,7 @@ void saveNonVTAConvolutionInst(
     }
   }
 
-  // The bias scale may differ from inScale * filterScale (e.g. SSD300-VGG16
-  // extra.0.1 without NESTC_EVTA_GRAPH_OPT); nonvtaconvolution then rescales
-  // the bias on the CPU.
+  assert(biasScale == inScale * filterScale);
 
   auto biasSte = addConstantSymbolEntry(bias, ctx);
 
@@ -956,6 +954,8 @@ void prepareEVTAConvolutionInst(const glow::VTAConvolutionInst *Inst,
   outScale = 1 / outScale;
   float matMulScale = inScale * filterScale;
   // assert(matMulScale / outScale > 1);
+  // VTA adds the bias to the accumulator as is (see alignVTAConvBiasScale).
+  assert(1 / bias->getType()->getScale() == matMulScale);
 
   // save Weight file
   auto vMap = ctx->getVariableMap();
