@@ -49,9 +49,11 @@ bool glow::foldVTARequantRounding(Function *F, ConvolutionNode &CN) {
   }
 
   // Same conditions as the VTA path in VTAInterpreterNodes.cpp and
-  // VTASave.cpp (NHWC input, group 1, channels in blocks of 16, zero offsets,
-  // power-of-2 rescale). Scales are compared exactly the way they are there.
-  if (CN.getGroup() != 1 || inTy->dims()[3] % 16 != 0 ||
+  // VTASave.cpp (NHWC input, group 1, no dilation, channels in blocks of 16,
+  // zero offsets, power-of-2 rescale). Scales are compared exactly the way
+  // they are there.
+  if (CN.getGroup() != 1 || CN.getDilation()[0] != 1 ||
+      CN.getDilation()[1] != 1 || inTy->dims()[3] % 16 != 0 ||
       outTy->dims()[3] % 16 != 0) {
     return false;
   }

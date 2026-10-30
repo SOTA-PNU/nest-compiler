@@ -25,6 +25,7 @@
 #include "glow/Optimizer/IROptimizer/IROptimizer.h"
 #include <cstring>
 #include <fstream>
+#include <set>
 #include <vector>
 
 //#define VTA_PROFILE
@@ -55,6 +56,11 @@ public:
   IRFunction::VariableMap *getVariableMap() { return variable_map; }
   void setIdxMultiEVTA(uint32_t idx) { idxMultiEVTA = idx; }
   uint32_t getIdxMultiEVTA() { return idxMultiEVTA; }
+  /// Records that the payload of constant \p name is in the weights file;
+  /// returns false if it already was.
+  bool markWritten(const std::string &name) {
+    return writtenConstants.insert(name).second;
+  }
 
 private:
   IRFunction::VariableMap *variable_map;
@@ -64,6 +70,7 @@ private:
   uint64_t constantWeightVarsMemSize;
   uint64_t mutableWeightVarsMemSize;
   std::ofstream *wfos;
+  std::set<std::string> writtenConstants;
   uint32_t idxMultiEVTA;
 };
 
@@ -186,6 +193,19 @@ SymbolTableEntry addConstantSymbolEntry_BNN(Value* val, VTASaveContext *ctx, boo
   return ste;
 }
 
+/// The weights file stream for writing the payload of constant \p val, or a
+/// stream that drops the data if it has been written already. Glow merges
+/// constants with equal payloads (e.g. two convolution biases that quantize
+/// to the same values), and writing such a constant a second time would shift
+/// every later constant in the weights file.
+std::ostream *getWeightStreamFor(Value *val, VTASaveContext *ctx) {
+  static std::ofstream discard;
+  if (!ctx->markWritten(val->getName().str())) {
+    return &discard;
+  }
+  return ctx->getWeightFileStream();
+}
+
 int getExpofPowerofTwo(int x) {
   int n = 0;
   // checks whether a number is zero or not
@@ -249,7 +269,7 @@ void saveFloatConvolutionInst(const glow::ConvolutionInst *Inst,
 
   auto handle = tensor->getHandle();
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(filter, ctx);
 
     for (size_t i = 0, e = handle.size(); i < e; i++) {
       auto data = handle.raw(i);
@@ -275,7 +295,7 @@ void saveFloatConvolutionInst(const glow::ConvolutionInst *Inst,
 
   auto handleBias = tensorBias->getHandle();
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(bias, ctx);
     for (size_t i = 0, e = handleBias.size(); i < e; i++) {
       auto data = handleBias.raw(i);
       fos->write((const char *)&data, sizeof(float));
@@ -416,7 +436,7 @@ void saveNonVTAConvolutionInst(
   auto handle = tensor->getHandle<int8_t>();
   assert(handle.size() % 2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(filter, ctx);
     int16_t data16 = 0;
     for (size_t i = 0, e = handle.size(); i < e; i++) {
       auto data = handle.raw(i);
@@ -456,7 +476,7 @@ void saveNonVTAConvolutionInst(
   auto handleBias = tensorBias->getHandle<int32_t>();
   assert(handleBias.size() % 2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(bias, ctx);
     for (size_t i = 0, e = handleBias.size(); i < e; i++) {
       auto data = handleBias.raw(i);
       fos->write((const char *)&data, 4);
@@ -613,7 +633,7 @@ void saveBNNNonVTAConvolutionInst(const glow::BNNConvolutionInst *Inst,
   auto handle = tensor->getHandle<int8_t>();
   assert(handle.size() %2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(filter, ctx);
     int16_t data16 = 0;
     for (size_t i = 0, e = handle.size(); i < e; i++) {
       auto data = handle.raw(i);
@@ -657,7 +677,7 @@ void saveBNNNonVTAConvolutionInst(const glow::BNNConvolutionInst *Inst,
   auto handleBias = tensorBias->getHandle<int32_t>();
   assert(handleBias.size() %2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(bias, ctx);
     for (size_t i = 0, e = handleBias.size(); i < e; i++) {
       auto data = handleBias.raw(i);
       fos->write((const char *) &data, 4);
@@ -835,7 +855,7 @@ void prepareVTAConvolutionInst(const glow::ConvolutionInst *Inst,
 
   assert(handle.size() % 2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(filter, ctx);
     int16_t data16 = 0;
     for (size_t i = 0, e = transposeHandle.size(); i < e; i++) {
       auto data = transposeHandle.raw(i);
@@ -882,7 +902,7 @@ void prepareVTAConvolutionInst(const glow::ConvolutionInst *Inst,
       }
     }
     if (doBias) {
-      auto fos = ctx->getWeightFileStream();
+      auto fos = getWeightStreamFor(bias, ctx);
       for (size_t i = 0, e = handleBias.size(); i < e; i++) {
         auto data = handleBias.raw(i);
         fos->write((const char *)&data, 4);
@@ -986,7 +1006,7 @@ void prepareEVTAConvolutionInst(const glow::VTAConvolutionInst *Inst,
 
   // assert(handle.size() %2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(filter, ctx);
     int16_t data16 = 0;
     for (size_t i = 0, e = transposeHandle.size(); i < e; i++) {
       auto data = transposeHandle.raw(i);
@@ -1033,7 +1053,7 @@ void prepareEVTAConvolutionInst(const glow::VTAConvolutionInst *Inst,
       }
     }
     if (doBias) {
-      auto fos = ctx->getWeightFileStream();
+      auto fos = getWeightStreamFor(bias, ctx);
       for (size_t i = 0, e = handleBias.size(); i < e; i++) {
         auto data = handleBias.raw(i);
         fos->write((const char *)&data, 4);
@@ -1147,7 +1167,7 @@ void prepareFirstBNNVTAConvolutionInst(const glow::ConvolutionInst *Inst,
 
   assert(handle.size() %2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(filter, ctx);
     int16_t data16 = 0;
     for (size_t i = 0, e = transposeHandle.size(); i < e; i++) {
       auto data = transposeHandle.raw(i);
@@ -1195,7 +1215,7 @@ void prepareFirstBNNVTAConvolutionInst(const glow::ConvolutionInst *Inst,
       }
     }
     if(doBias) {
-      auto fos = ctx->getWeightFileStream();
+      auto fos = getWeightStreamFor(bias, ctx);
       for (size_t i = 0, e = handleBias.size(); i < e; i++) {
         auto data = handleBias.raw(i);
         fos->write((const char *) &data, 4);
@@ -1307,7 +1327,7 @@ void prepareBNNVTAConvolutionInst(const glow::BNNConvolutionInst *Inst,
 
   assert(handle.size() %2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(filter, ctx);
     int16_t data16 = 0;
     for (size_t i = 0, e = transposeHandle.size(); i < e; i++) {
       auto data = transposeHandle.raw(i);
@@ -1353,7 +1373,7 @@ void prepareBNNVTAConvolutionInst(const glow::BNNConvolutionInst *Inst,
       }
     }
     if(doBias) {
-      auto fos = ctx->getWeightFileStream();
+      auto fos = getWeightStreamFor(bias, ctx);
       for (size_t i = 0, e = handleBias.size(); i < e; i++) {
         auto data = handleBias.raw(i);
         fos->write((const char *) &data, 4);
@@ -1393,7 +1413,7 @@ void prepareBNNVTAConvolutionInst(const glow::BNNConvolutionInst *Inst,
         }
       }
       if(doMul) {
-        auto fos = ctx->getWeightFileStream();
+        auto fos = getWeightStreamFor(scalingfactor, ctx);
         for (size_t i = 0, e = handleScalingfactor.size(); i < e; i++) {
           auto data = handleScalingfactor.raw(i);
           fos->write((const char *) &data, 4);
@@ -1542,7 +1562,7 @@ void preparezeroFillBNNVTAConvolutionInst(const glow::BNNConvolutionInst *Inst,
 
   assert(handle.size() %2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(filter, ctx);
     int16_t data16 = 0;
     for (size_t i = 0, e = transposeHandle.size(); i < e; i++) {
       auto data = transposeHandle.raw(i);
@@ -1590,7 +1610,7 @@ void preparezeroFillBNNVTAConvolutionInst(const glow::BNNConvolutionInst *Inst,
       }
     }
     if(doBias) {
-      auto fos = ctx->getWeightFileStream();
+      auto fos = getWeightStreamFor(bias, ctx);
       for (size_t i = 0, e = handleBias.size(); i < e; i++) {
         auto data = handleBias.raw(i);
         fos->write((const char *) &data, 4);
@@ -1630,7 +1650,7 @@ void preparezeroFillBNNVTAConvolutionInst(const glow::BNNConvolutionInst *Inst,
         }
       }
       if(doMul) {
-        auto fos = ctx->getWeightFileStream();
+        auto fos = getWeightStreamFor(scalingfactor, ctx);
         for (size_t i = 0, e = handleScalingfactor.size(); i < e; i++) {
           auto data = handleScalingfactor.raw(i);
           fos->write((const char *) &data, 4);
@@ -3052,8 +3072,12 @@ void saveConvolutionInst(const glow::ConvolutionInst *Inst, std::string *bundle,
     float scale = matMulScale / outScale;
 
     int shift = getExpofPowerofTwo(scale);
+    // convolution_wo_tr has no dilation; dilated convs (e.g. SSD's conv6) run
+    // on the CPU.
+    bool noDilation = Inst->getDilation()[0] == 1 && Inst->getDilation()[1] == 1;
 
-    if (Inst->getGroup() == 1 && scale > 1 && srcDims[3] % 16 == 0 &&
+    if (Inst->getGroup() == 1 && noDilation && scale > 1 &&
+        srcDims[3] % 16 == 0 &&
         filterDims[0] % 16 == 0 && biasScale == matMulScale && outOffset == 0 &&
         inOffset == 0 && filterOffset == 0 && biasOffset == 0 && shift >= 0) {
       saveVTAConvolutionInst(Inst, bundle, initConst, ctx);
@@ -3161,7 +3185,7 @@ void saveFullyConnectedInst(const glow::FullyConnectedInst *Inst,
   auto handle = tensor->getHandle<int8_t>();
   assert(handle.size() % 2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(filter, ctx);
     int16_t data16 = 0;
     for (size_t i = 0, e = handle.size(); i < e; i++) {
       auto data = handle.raw(i);
@@ -3198,7 +3222,7 @@ void saveFullyConnectedInst(const glow::FullyConnectedInst *Inst,
   auto handleBias = tensorBias->getHandle<int32_t>();
   assert(handleBias.size() % 2 == 0);
   {
-    auto fos = ctx->getWeightFileStream();
+    auto fos = getWeightStreamFor(bias, ctx);
     for (size_t i = 0, e = handleBias.size(); i < e; i++) {
       auto data = handleBias.raw(i);
       fos->write((const char *)&data, 4);
@@ -3392,7 +3416,19 @@ void saveTensorViewInst(const glow::TensorViewInst *Inst, std::string *bundle,
     bundle->append(src->getName());
   }
 
-  // bundle->append(Inst->getSrc()->getName().str());
+  // A view starting inside its source (e.g. one input's slot in a concat
+  // buffer) is the source pointer plus the row-major offset.
+  auto offsets = Inst->getOffsets();
+  auto srcDims = src->dims();
+  dim_t offset = 0, stride = 1;
+  for (int i = int(srcDims.size()) - 1; i >= 0; i--) {
+    offset += (i < int(offsets.size()) ? offsets[i] : 0) * stride;
+    stride *= srcDims[i];
+  }
+  if (offset) {
+    bundle->append(" + ");
+    bundle->append(std::to_string(offset * src->getType()->getElementSize()));
+  }
   bundle->append(";\n");
   return;
 }
@@ -4599,6 +4635,174 @@ void saveReluInst(const glow::ReluInst *Inst, std::string *bundle,
   bundle->append(" );\n");
 }
 
+// ---------------------------------------------------------------
+// Layout-independent instructions (vtalib CPUBundle_common.cpp).
+// These are emitted for the parts of a network that do not map to VTA, e.g.
+// the float L2 normalization and the head reshape/concat of SSD.
+// ---------------------------------------------------------------
+
+/// Returns the C expression for the buffer of \p val in the generated bundle.
+/// Mutable placeholders get a symbol on first use, constants are appended to
+/// the weights file on first use, and activations and tensor views are local
+/// variables with the value's name.
+std::string getBufferExpr(Value *val, std::string *bundle,
+                          VTASaveContext *ctx) {
+  auto *wgt = llvm::dyn_cast<WeightVar>(val);
+  if (!wgt) {
+    return val->getName().str();
+  }
+  if (wgt->getMutability() == glow::WeightVar::MutabilityKind::Mutable) {
+    return addSymbolEntryGenBundle(wgt, bundle, ctx).name;
+  }
+  if (ctx->markWritten(wgt->getName().str())) {
+    const Tensor *tensor = nullptr;
+    for (auto &it : *ctx->getVariableMap()) {
+      if (it.second == wgt) {
+        if (auto *constant = llvm::dyn_cast<Constant>(it.first)) {
+          tensor = &constant->getPayload();
+        }
+        break;
+      }
+    }
+    if (!tensor) {
+      llvm::errs() << "No payload for constant " << wgt->getName() << "\n";
+      std::exit(1);
+    }
+    addConstantSymbolEntry(wgt, ctx);
+    ctx->getWeightFileStream()->write(tensor->getUnsafePtr(),
+                                      wgt->getSizeInBytes());
+  }
+  return "(int8_t *)VTABufferGetVirtAddr(" + wgt->getName().str() + ")";
+}
+
+/// Appends "{a, b, ...}" for \p values.
+template <typename T>
+std::string arrayLiteral(llvm::ArrayRef<T> values) {
+  std::string s = "{";
+  for (size_t i = 0; i < values.size(); i++) {
+    s += (i ? ", " : "") + std::to_string(values[i]);
+  }
+  return s + "}";
+}
+
+/// Fails the compilation for a type the bundle has no implementation for.
+void unsupportedType(const Instruction *I) {
+  llvm::errs() << I->getKindName() << " " << I->getName()
+               << ": unsupported element type in the VTA bundle\n";
+  std::exit(1);
+}
+
+void saveTransposeNdInst(const glow::TransposeInst *Inst, std::string *bundle,
+                         VTASaveContext *ctx) {
+  auto src = Inst->getSrc();
+  auto in = getBufferExpr(src, bundle, ctx);
+  auto out = getBufferExpr(Inst->getDest(), bundle, ctx);
+  std::vector<dim_t> dims(src->dims().begin(), src->dims().end());
+  std::vector<unsigned_t> shuffle(Inst->getShuffle().begin(),
+                                  Inst->getShuffle().end());
+  bundle->append("  {\n    const dim_t inDims[] = " +
+                 arrayLiteral<dim_t>(dims) + ";\n");
+  bundle->append("    const unsigned_t shuffle[] = " +
+                 arrayLiteral<unsigned_t>(shuffle) + ";\n");
+  bundle->append("    transpose_nd(" + in + ", " + out + ", inDims, shuffle, " +
+                 std::to_string(dims.size()) + ", " +
+                 std::to_string(src->getType()->getElementSize()) + ");\n  }\n");
+}
+
+void saveInsertTensorInst(const glow::InsertTensorInst *Inst,
+                          std::string *bundle, VTASaveContext *ctx) {
+  auto src = Inst->getSrc();
+  auto dest = Inst->getDest();
+  if (src->getElementType() != dest->getElementType()) {
+    unsupportedType(Inst);
+  }
+  auto in = getBufferExpr(src, bundle, ctx);
+  auto out = getBufferExpr(dest, bundle, ctx);
+  std::vector<dim_t> outDims(dest->dims().begin(), dest->dims().end());
+  std::vector<dim_t> inDims(src->dims().begin(), src->dims().end());
+  std::vector<dim_t> offsets(Inst->getOffsets().begin(),
+                             Inst->getOffsets().end());
+  bundle->append("  {\n    const dim_t outDims[] = " +
+                 arrayLiteral<dim_t>(outDims) + ";\n");
+  bundle->append("    const dim_t inDims[] = " + arrayLiteral<dim_t>(inDims) +
+                 ";\n");
+  bundle->append("    const dim_t offsets[] = " +
+                 arrayLiteral<dim_t>(offsets) + ";\n");
+  bundle->append("    insert_tensor(" + out + ", " + in +
+                 ", outDims, inDims, offsets, " +
+                 std::to_string(outDims.size()) + ", " +
+                 std::to_string(src->getType()->getElementSize()) + ", " +
+                 std::to_string(Inst->getCount()) + ", " +
+                 std::to_string(Inst->getAxis()) + ");\n  }\n");
+}
+
+void saveCopyInst(const glow::CopyInst *Inst, std::string *bundle,
+                  VTASaveContext *ctx) {
+  auto in = getBufferExpr(Inst->getSrc(), bundle, ctx);
+  auto out = getBufferExpr(Inst->getDest(), bundle, ctx);
+  bundle->append("  memcpy(" + out + ", " + in + ", " +
+                 std::to_string(Inst->getSrc()->getSizeInBytes()) + ");\n");
+}
+
+void saveSplatFloatInst(const glow::SplatInst *Inst, std::string *bundle,
+                        VTASaveContext *ctx) {
+  auto out = getBufferExpr(Inst->getDest(), bundle, ctx);
+  char value[32];
+  snprintf(value, sizeof(value), "%.9g", Inst->getValue());
+  bundle->append("  splat_f32(" + out + ", " +
+                 std::to_string(Inst->getDest()->size()) + ", " + value +
+                 ");\n");
+}
+
+/// Float element-wise binary instruction \p I calling \p fn(lhs, rhs, dest,
+/// size).
+template <typename InstTy>
+void saveFloatBinaryInst(const InstTy *I, const char *fn, std::string *bundle,
+                         VTASaveContext *ctx) {
+  if (I->getDest()->getElementType() != ElemKind::FloatTy ||
+      I->getLHS()->getElementType() != ElemKind::FloatTy ||
+      I->getRHS()->getElementType() != ElemKind::FloatTy) {
+    unsupportedType(I);
+  }
+  auto lhs = getBufferExpr(I->getLHS(), bundle, ctx);
+  auto rhs = getBufferExpr(I->getRHS(), bundle, ctx);
+  auto out = getBufferExpr(I->getDest(), bundle, ctx);
+  bundle->append(std::string("  ") + fn + "(" + lhs + ", " + rhs + ", " + out +
+                 ", " + std::to_string(I->getDest()->size()) + ");\n");
+}
+
+/// Float division. saveElemDivInst's float path assumes a constant divisor.
+void saveFloatDivInst(const glow::ElementDivInst *Inst, std::string *bundle,
+                      VTASaveContext *ctx) {
+  if (Inst->getDest()->getElementType() != ElemKind::FloatTy ||
+      Inst->getRHS()->getElementType() != ElemKind::FloatTy) {
+    unsupportedType(Inst);
+  }
+  auto lhs = getBufferExpr(Inst->getLHS(), bundle, ctx);
+  auto rhs = getBufferExpr(Inst->getRHS(), bundle, ctx);
+  auto out = getBufferExpr(Inst->getDest(), bundle, ctx);
+  // The scale/offset arguments are unused by elemdiv_f32.
+  bundle->append("  elemdiv_f32(" + lhs + ", 1, 0, " + rhs + ", 1, 0, " + out +
+                 ", 1, 0, " + std::to_string(Inst->getDest()->size()) +
+                 ");\n");
+}
+
+void saveBatchedReduceAddInst(const glow::BatchedReduceAddInst *Inst,
+                              std::string *bundle, VTASaveContext *ctx) {
+  auto batch = Inst->getBatch();
+  if (batch->getElementType() != ElemKind::FloatTy) {
+    unsupportedType(Inst);
+  }
+  auto in = getBufferExpr(batch, bundle, ctx);
+  auto out = getBufferExpr(Inst->getDest(), bundle, ctx);
+  std::vector<dim_t> dims(batch->dims().begin(), batch->dims().end());
+  bundle->append("  {\n    const dim_t inDims[] = " +
+                 arrayLiteral<dim_t>(dims) + ";\n");
+  bundle->append("    batched_reduce_add_f32(" + in + ", " + out +
+                 ", inDims, " + std::to_string(dims.size()) + ", " +
+                 std::to_string(Inst->getAxis()) + ");\n  }\n");
+}
+
 struct BundleSaveCtx {
   std::string bundle;
   std::string initConst;
@@ -5004,28 +5208,64 @@ void VTA::save(Function *F, llvm::StringRef outputDir,
       auto I2 = llvm::cast<TransposeInst>(&I);
       auto srcDimSize = I2->getSrc()->dims().size();
 
-      if (srcDimSize == 4) {
+      // transpose/transpose_6dim move int8 elements only.
+      bool isInt8 = I2->getSrc()->getElementType() == ElemKind::Int8QTy;
+      if (isInt8 && srcDimSize == 4) {
         saveTransposeInst(I2, &bundle, &ctx);
-      } else if (srcDimSize == 6) {
+      } else if (isInt8 && srcDimSize == 6) {
         saveTranspose_6dim(I2, &bundle, &ctx);
       } else {
-        llvm::errs() << "Not supported dimenstion in transpose\n"
-                        "Please use 4 dim or 6 dim\n";
-        std::exit(1);
+        saveTransposeNdInst(I2, &bundle, &ctx);
       }
 
       break;
     }
     case Kinded::Kind::SplatInstKind: {
       auto I2 = llvm::cast<SplatInst>(&I);
-      saveSplatInst(I2, &bundle, &ctx);
+      if (I2->getDest()->getElementType() == ElemKind::FloatTy) {
+        saveSplatFloatInst(I2, &bundle, &ctx);
+      } else {
+        saveSplatInst(I2, &bundle, &ctx);
+      }
       break;
     }
     case Kinded::Kind::ElementMaxInstKind: {
       auto I2 = llvm::cast<ElementMaxInst>(&I);
-      saveElemMaxInst(I2, &bundle, &ctx);
+      if (I2->getDest()->getType()->isQuantizedType()) {
+        saveElemMaxInst(I2, &bundle, &ctx);
+      } else {
+        saveFloatBinaryInst(I2, "elemmax_f32", &bundle, &ctx);
+      }
       break;
     }
+    case Kinded::Kind::ElementMulInstKind: {
+      auto I2 = llvm::cast<ElementMulInst>(&I);
+      saveFloatBinaryInst(I2, "elemmul_f32", &bundle, &ctx);
+      break;
+    }
+    case Kinded::Kind::ElementPowInstKind: {
+      auto I2 = llvm::cast<ElementPowInst>(&I);
+      saveFloatBinaryInst(I2, "elempow_f32", &bundle, &ctx);
+      break;
+    }
+    case Kinded::Kind::BatchedReduceAddInstKind: {
+      auto I2 = llvm::cast<BatchedReduceAddInst>(&I);
+      saveBatchedReduceAddInst(I2, &bundle, &ctx);
+      break;
+    }
+    case Kinded::Kind::InsertTensorInstKind: {
+      auto I2 = llvm::cast<InsertTensorInst>(&I);
+      saveInsertTensorInst(I2, &bundle, &ctx);
+      break;
+    }
+    case Kinded::Kind::CopyInstKind: {
+      auto I2 = llvm::cast<CopyInst>(&I);
+      saveCopyInst(I2, &bundle, &ctx);
+      break;
+    }
+    case Kinded::Kind::TouchInstKind:
+      // Leaves the buffer uninitialized; every element is written later.
+      break;
     case Kinded::Kind::ElementAddInstKind: {
       auto I2 = llvm::cast<ElementAddInst>(&I);
       saveElemAddInst(I2, &bundle, &ctx);
@@ -5038,7 +5278,11 @@ void VTA::save(Function *F, llvm::StringRef outputDir,
     }
     case Kinded::Kind::ElementDivInstKind: {
       auto I2 = llvm::cast<ElementDivInst>(&I);
-      saveElemDivInst(I2, &bundle, &ctx);
+      if (I2->getLHS()->getType()->isQuantizedType()) {
+        saveElemDivInst(I2, &bundle, &ctx);
+      } else {
+        saveFloatDivInst(I2, &bundle, &ctx);
+      }
       break;
     }
     case Kinded::Kind::AvgPoolInstKind: {
