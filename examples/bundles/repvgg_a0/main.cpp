@@ -319,6 +319,16 @@ static int dumpInferenceResults(const BundleConfig &config,
   printf("Result: %u\n", maxIdx);
   printf("Confidence: %f\n", maxValue);
 
+  // REPVGG_DUMP_LOGITS=<file> writes the raw float logits for offline checks
+  // such as utils/imagenet_val_script/repvgg_a0_accuracy.py.
+  if (const char *dumpPath = getenv("REPVGG_DUMP_LOGITS")) {
+    FILE *f = fopen(dumpPath, "wb");
+    if (f) {
+      fwrite(results, sizeof(float), outputWeights.size, f);
+      fclose(f);
+    }
+  }
+
   return maxIdx;
 }
 
