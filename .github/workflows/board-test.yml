@@ -1,0 +1,130 @@
+name: board-test
+
+# GitLab CI(.gitlab-ci.yml)의 test-board job 에 해당한다. build.yml 이 옮기지 않고
+# "보드 테스트는 SOTA-PNU/nestc-zcu102 에서 한다" 고 남겨 둔 부분이다.
+#
+# 이 커밋을 ZCU102 보드(VTA/EVTA)에서 실제로 돌린다. 보드는 한 대뿐이고 보드 접속 키,
+# 보드에 닿는 self-hosted 러너, 보드 작업 대기열은 nestc-zcu102 에 있다. 그래서 이
+# workflow 는 nestc-zcu102 의 nest-compiler workflow 에 이 커밋을 넘겨(repository_dispatch)
+# 검증을 맡기고, 끝날 때까지 기다렸다가 그 판정을 이 저장소의 check 로 보여 준다.
+#
+# 보드 쪽에서 하는 일:
+#   - 이 커밋으로 model-compiler 와 보드 런타임(vta/vtalib) 을 빌드
+#   - ResNet-18 / ResNet-50 단일 코어: cat_285 / dog_207 / zebra_340 정답 판정
+#   - ResNet-18 4코어 / ResNet-50 3코어 multi-EVTA: 정답 + 커널 oops 0건 + 처리량
+#   - 결과 표: https://github.com/SOTA-PNU/nestc-zcu102/blob/main/results/nest-compiler.md
+#
+# build.yml 과 같이 이 저장소 전용 self-hosted 러너(compute-nestc)에서
+# ETRI 공식 SDK 이미지(onesai1/nest-compiler-sdk) 안에서 돈다.
+# GitHub 호스티드 러너는 쓰지 않는다. 이 job 은 요청하고 기다리기만 하므로
+# 빌드를 하지 않고, 서버 부하 대기(wait-for-idle)도 하지 않는다.
+#
+# 필요한 시크릿: BOARD_CI_TOKEN
+#   SOTA-PNU/nestc-zcu102 하나에만 접근하는 fine-grained 토큰.
+#   Contents: Read and write (repository_dispatch 요청), Actions: Read-only (실행 상태 조회).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 다른 저장소에 요청만 보낸다. 이 저장소에 대해서는 읽기 권한만 준다.
+permissions:
+  contents: read
+
+# 같은 브랜치에 새 커밋이 오면 이전 실행은 의미가 없다. main 은 끝까지 돌린다.
+# (이쪽 대기를 취소해도 이미 시작한 보드 쪽 실행은 끝까지 간다. VTA 추론 중 취소는 위험하다.)
+concurrency:
+  group: board-test-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  BOARD_REPO: SOTA-PNU/nestc-zcu102
+  BOARD_WORKFLOW: nest-compiler.yml
+
+jobs:
+  zcu102:
+    # public 레포 + self-hosted 러너: 포크에서 온 PR 은 이 머신에서 실행하지 않는다.
+    # 본 레포 브랜치에서 연 PR(조직 멤버)은 정상 실행된다. (포크 PR 에는 시크릿도 없다.)
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, X64, nestc]
+    container:
+      image: onesai1/nest-compiler-sdk:1.0.0
+    # 보드 대기열(앞선 보드 작업) + 빌드 + 추론. 보통 20~40분.
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ secrets.BOARD_CI_TOKEN }}
+      SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      PR: ${{ github.event.pull_request.number }}
+
+    steps:
+      - name: 보드 검증 요청
+        run: |
+          set -eu
+          [ -n "$GH_TOKEN" ] || { echo "::error::시크릿 BOARD_CI_TOKEN 이 없다"; exit 1; }
+          echo "START=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_ENV"
+          # nestc-zcu102 쪽 실행 이름(run-name)이 "nest-compiler <커밋>[ (PR #n)]" 이다.
+          # 다음 단계는 이 이름으로 자기가 요청한 실행을 찾는다.
+          if [ -n "$PR" ]; then
+            echo "TITLE=nest-compiler $SHA (PR #$PR)" >> "$GITHUB_ENV"
+          else
+            echo "TITLE=nest-compiler $SHA" >> "$GITHUB_ENV"
+          fi
+          # SDK 이미지(1.0.0)에는 jq 가 없다. JSON 은 python3 로 만든다.
+          payload=$(python3 -c 'import json, os
+          p = {"ref": os.environ["SHA"]}
+          if os.environ.get("PR"): p["pr"] = os.environ["PR"]
+          print(json.dumps({"event_type": "nest-compiler", "client_payload": p}))')
+          curl -fsS -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$BOARD_REPO/dispatches" -d "$payload"
+          echo "요청: $SHA"
+
+      - name: 보드 결과 대기
+        run: |
+          set -eu
+          api() { curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" "$@"; }
+          field() { python3 -c 'import json, sys; v = json.load(sys.stdin).get(sys.argv[1]); print("" if v is None else v)' "$1"; }
+          # 실행이 만들어지기까지 최대 10분 기다린다. 이름이 같고 요청 뒤에 만들어진 것 중 마지막.
+          RUN=
+          for i in $(seq 1 40); do
+            RUN=$(api "https://api.github.com/repos/$BOARD_REPO/actions/workflows/$BOARD_WORKFLOW/runs?event=repository_dispatch&per_page=30" |
+              python3 -c 'import json, os, sys
+          runs = [r for r in json.load(sys.stdin)["workflow_runs"]
+                  if r["display_title"] == os.environ["TITLE"] and r["created_at"] >= os.environ["START"]]
+          print(max(runs, key=lambda r: r["created_at"])["id"] if runs else "")')
+            [ -n "$RUN" ] && break
+            sleep 15
+          done
+          [ -n "$RUN" ] || { echo "::error::nestc-zcu102 쪽 실행을 찾지 못했다"; exit 1; }
+          echo "RUN_URL=https://github.com/$BOARD_REPO/actions/runs/$RUN" >> "$GITHUB_ENV"
+          echo "보드 실행: https://github.com/$BOARD_REPO/actions/runs/$RUN"
+          # 앞선 보드 작업이 있으면 그 뒤에 줄을 선다(zcu102-board). 1분마다 상태를 본다.
+          while :; do
+            r=$(api "https://api.github.com/repos/$BOARD_REPO/actions/runs/$RUN")
+            st=$(field status <<<"$r")
+            [ "$st" = completed ] && break
+            echo "[$(date -u +%H:%M:%S)] $st"
+            sleep 60
+          done
+          CONCLUSION=$(field conclusion <<<"$r")
+          echo "CONCLUSION=$CONCLUSION" >> "$GITHUB_ENV"
+          echo "판정: $CONCLUSION"
+          [ "$CONCLUSION" = success ]
+
+      - name: 요약
+        if: always()
+        run: |
+          {
+            echo '### ZCU102 보드'
+            echo "- 커밋: \`$SHA\`"
+            echo "- 보드 실행: ${RUN_URL:-(찾지 못함)}"
+            echo "- 판정: **${CONCLUSION:-(끝나지 않음)}**"
+            echo "- 결과 표: https://github.com/$BOARD_REPO/blob/main/results/nest-compiler.md"
+          } >> "$GITHUB_STEP_SUMMARY"
