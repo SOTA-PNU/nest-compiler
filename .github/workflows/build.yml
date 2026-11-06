@@ -208,6 +208,11 @@ jobs:
           repository: SOTA-PNU/nestc-zcu102
           path: zcu102
 
+      # 같은 서버에 SOTA-PNU/nestc-zcu102 러너도 있다. concurrency 는 저장소마다 따로라
+      # 서버 홈의 잠금으로 보드를 번갈아 쓴다. 보드가 사용 중이면 여기서 기다린다.
+      - name: 보드 잠금
+        run: bash zcu102/scripts/board-lock.sh acquire
+
       # ~/.ssh/config 는 건드리지 않고 이 job 전용 설정 파일을 쓴다.
       - name: 보드 접속 준비
         run: |
@@ -336,6 +341,10 @@ jobs:
           . "$RUNNER_TEMP/board.sh"
           ssh board "test -x /home/xilinx/board-bitstream.sh && /home/xilinx/board-bitstream.sh single" || \
             echo "::warning::단일 비트스트림으로 되돌리지 못했다. 재부팅하면 rc.local 이 되돌린다."
+
+      - name: 보드 잠금 해제
+        if: always()
+        run: bash zcu102/scripts/board-lock.sh release
 
       - name: 요약
         if: always()
