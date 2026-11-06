@@ -2,10 +2,10 @@ name: build
 
 # GitLab CI(.gitlab-ci.yml)의 build / test 스테이지를 옮긴 것이다.
 # 고객 배포용이던 S3 관련 job(build_from_aws, build-publish,
-# build-autotune-publish, publish)과 보드 job(test-board), openedge 는 옮기지 않았다.
-# 보드 테스트는 SOTA-PNU/nestc-zcu102 에서 한다.
+# build-autotune-publish, publish)과 openedge 는 옮기지 않았다.
+# 보드 job(test-board)은 보드에 닿는 연구실 서버의 러너(label zcu102)에서 돈다.
 #
-# 모든 job 은 이 저장소 전용 self-hosted 러너(compute-nestc)에서
+# test-board 를 뺀 모든 job 은 이 저장소 전용 self-hosted 러너(compute-nestc)에서
 # ETRI 공식 SDK 이미지(onesai1/nest-compiler-sdk) 안에서 돈다.
 # GitHub 호스티드 러너는 쓰지 않는다.
 
@@ -166,6 +166,195 @@ jobs:
         run: |
           rm -rf "$GITHUB_WORKSPACE/$BUILD"
           chown -R "$(stat -c %u:%g "$GITHUB_WORKSPACE/..")" "$GITHUB_WORKSPACE"
+
+  # GitLab: test-board
+  # build 가 통과한 커밋을 ZCU102 보드(VTA/EVTA)에서 실제로 돌린다.
+  #   - 이 커밋으로 model-compiler 와 보드 런타임(vta/vtalib) 빌드
+  #   - ResNet-18 / ResNet-50 단일 코어: cat_285 / dog_207 / zebra_340 정답 판정
+  #   - ResNet-18 4코어 / ResNet-50 3코어 multi-EVTA: 정답 + 커널 oops 0건 + 처리량
+  #
+  # 보드는 연구실 서버(sota-AIP)에서만 닿는다. 그래서 이 job 은 그 서버의 러너
+  # (label zcu102)에서 컨테이너 없이 돈다. 보드는 한 대라 zcu102-board 로 한 번에 하나만 돈다.
+  # 서버에 준비해 둔 것:
+  #   ~/nestc-sota         이 저장소의 클론과 빌드 디렉터리. 커밋만 바꿔 증분 빌드한다(약 2분).
+  #   ~/.ssh/zcu102_key    보드 접속 키(보드 authorized_keys 에 등록)
+  #   leejaymin/nestc-ssh  ~/nestc-sota/build 를 빌드한 이미지. 번들 생성도 같은 이미지에서 한다.
+  # 보드에 준비해 둔 것: ~/nest-compiler-sota (build_aarch64, build_aarch64_multi)
+  # 번들 생성·보드 실행 스크립트와 모델 설정은 SOTA-PNU/nestc-zcu102 의 것을 쓴다.
+  # 그 저장소의 패치 중 이 저장소에 아직 없는 넷을 얹는다(patch_tiling, patch_transpose,
+  # patch_relu_rescale, patch_vta_max_xfer).
+  test-board:
+    needs: build
+    # public 레포 + self-hosted 러너: 포크에서 온 PR 은 이 머신에서 실행하지 않는다.
+    # 본 레포 브랜치에서 연 PR(조직 멤버)은 정상 실행된다.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, X64, zcu102]
+    timeout-minutes: 240
+    # VTA 추론 중에 취소하면 보드를 재부팅해야 한다. 보드 작업은 취소하지 않고 줄을 세운다.
+    concurrency:
+      group: zcu102-board
+      cancel-in-progress: false
+    env:
+      SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      BOARD_SRC: /home/xilinx/nest-compiler-sota
+      DOCKER_IMAGE: leejaymin/nestc-ssh:latest
+      TOOLS_IN_CONTAINER: /src/build/glow/bin
+      SINGLE_MODELS: "resnet18 resnet50"
+      MULTI_MODELS: "resnet18-4core resnet50-3core"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: SOTA-PNU/nestc-zcu102
+          path: zcu102
+
+      # ~/.ssh/config 는 건드리지 않고 이 job 전용 설정 파일을 쓴다.
+      - name: 보드 접속 준비
+        run: |
+          set -eu
+          cat > "$RUNNER_TEMP/board.conf" <<EOF
+          Host board
+            HostName 192.168.1.40
+            Port 22
+            User xilinx
+            IdentityFile $HOME/.ssh/zcu102_key
+            IdentitiesOnly yes
+            ServerAliveInterval 15
+            ServerAliveCountMax 4
+            StrictHostKeyChecking accept-new
+          EOF
+          cat > "$RUNNER_TEMP/board.sh" <<EOF
+          ssh() { command ssh -F "$RUNNER_TEMP/board.conf" "\$@"; }
+          scp() { command scp -F "$RUNNER_TEMP/board.conf" "\$@"; }
+          EOF
+          . "$RUNNER_TEMP/board.sh"
+          mkdir -p logs
+          ssh board 'uname -m; grep CmaFree /proc/meminfo'
+
+      - name: 컴파일러 빌드
+        run: |
+          set -euo pipefail
+          UP=$HOME/nestc-sota
+          echo "UP=$UP" >> "$GITHUB_ENV"
+          cd "$UP"
+          git fetch -q --no-recurse-submodules sota "$SHA"
+          git checkout -q -f --detach "$SHA"
+          git clean -fdq -e build
+          git submodule sync -q
+          git submodule update -q --init --force
+          echo "VTALIB_SHA=$(git -C vta/vtalib rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "nest-compiler $(git log --oneline -1)"
+          echo "vta_lib       $(git -C vta/vtalib log --oneline -1)"
+          python3 "$GITHUB_WORKSPACE/zcu102/ci/patch_tiling.py" "$UP"
+          docker run --rm -v "$UP":/root/nestc -w /root/nestc/build "$DOCKER_IMAGE" \
+            bash -c "ninja model-compiler image-classifier 2>&1 | tail -20"
+
+      # build_* 디렉터리는 추적되지 않는 파일이라 checkout -f 가 지우지 않는다.
+      - name: 보드 런타임 빌드
+        timeout-minutes: 40
+        run: |
+          set -euo pipefail
+          . "$RUNNER_TEMP/board.sh"
+          cd zcu102
+          scp ci/patch_transpose.py ci/patch_relu_rescale.py ci/patch_vta_max_xfer.py board:/home/xilinx/
+          ssh board "set -euo pipefail
+            cd $BOARD_SRC
+            for t in 1 2 3 4 5; do git fetch -q --no-recurse-submodules sota $SHA && break; sleep 30; done
+            git checkout -q -f --detach $SHA
+            git submodule sync -q vta/vtalib
+            git submodule update -q --force vta/vtalib
+            test \"\$(git -C vta/vtalib rev-parse HEAD)\" = $VTALIB_SHA
+            python3 /home/xilinx/patch_transpose.py $BOARD_SRC/vta/vtalib/lib/Bundle/CPUBundle_aarch64.cpp
+            python3 /home/xilinx/patch_relu_rescale.py $BOARD_SRC
+            python3 /home/xilinx/patch_vta_max_xfer.py $BOARD_SRC
+            for b in build_aarch64 build_aarch64_multi; do
+              echo \"--- \$b vtalib ---\"
+              make -C $BOARD_SRC/\$b/vta/vtalib -j2 2>&1 | tail -4
+            done" 2>&1 | tee ../logs/board-build.log
+
+      # 이 단계부터 VTA 가 열린다.
+      - name: 단일 코어
+        run: |
+          set -eu
+          . "$RUNNER_TEMP/board.sh"
+          cd zcu102
+          scp scripts/board-build-run.sh scripts/board-bitstream.sh scripts/board-multi-run.sh \
+            scripts/board-setup-multi.sh board:/home/xilinx/
+          ssh board "chmod +x /home/xilinx/board-*.sh; /home/xilinx/board-bitstream.sh single"
+          : > ../logs/summary.md
+          FAIL=0
+          for m in $SINGLE_MODELS; do
+            OUT="$PWD/bundle-out/$m"; BB="/home/xilinx/bundles/nc-$m"
+            rm -rf "$OUT"; mkdir -p "$OUT"
+            {
+              docker run --rm --user "$(id -u):$(id -g)" \
+                -v "$UP":/src -v "$PWD":/work -w /work "$DOCKER_IMAGE" \
+                bash scripts/gen-bundle.sh --conf "models/$m.conf" \
+                  --tools "$TOOLS_IN_CONTAINER" --upstream /src --out "/work/bundle-out/$m"
+              ssh board "rm -rf $BB; mkdir -p $BB"
+              scp "$OUT"/*.cpp "$OUT"/*.h "$OUT"/*.bin "$OUT"/bundle.conf board:"$BB/"
+              ssh board "set -eu; export PATH=\$HOME/bin:\$PATH
+                /home/xilinx/board-build-run.sh --bundle $BB --src $BOARD_SRC --build $BOARD_SRC/build_aarch64"
+            } 2>&1 | tee "../logs/$m.log" || true
+            if grep -q '^== 전부 통과' "../logs/$m.log"; then V=통과; else V=실패; FAIL=1; fi
+            { echo "#### $m — $V"; echo '```'
+              grep -E '^\s+(OK|FAIL) ' "../logs/$m.log" || echo "(결과 줄 없음)"
+              echo '```'; } >> ../logs/summary.md
+          done
+          echo "FAIL=$FAIL" >> "$GITHUB_ENV"
+
+      - name: multi-EVTA
+        run: |
+          set -eu
+          . "$RUNNER_TEMP/board.sh"
+          cd zcu102
+          for m in $MULTI_MODELS; do
+            OUT="$PWD/multi-out/$m"; BB="/home/xilinx/bundles/nc-multi-$m"
+            rm -rf "$OUT"; mkdir -p "$OUT"
+            {
+              docker run --rm --user "$(id -u):$(id -g)" \
+                -v "$UP":/src -v "$PWD":/work -w /work "$DOCKER_IMAGE" \
+                bash scripts/gen-bundle.sh --conf "models-multi/$m.conf" \
+                  --tools "$TOOLS_IN_CONTAINER" --upstream /src --out "/work/multi-out/$m"
+              ssh board "rm -rf $BB; mkdir -p $BB"
+              scp "$OUT"/*.cpp "$OUT"/*.h "$OUT"/*.bin "$OUT"/bundle.conf board:"$BB/"
+              ssh board "set -eu; export PATH=\$HOME/bin:\$PATH
+                /home/xilinx/board-bitstream.sh multi
+                /home/xilinx/board-multi-run.sh --bundle $BB --src $BOARD_SRC --build $BOARD_SRC/build_aarch64_multi"
+            } 2>&1 | tee "../logs/multi-$m.log" || true
+            if grep -q '^== 전부 통과' "../logs/multi-$m.log"; then V=통과; else V=실패; echo "FAIL=1" >> "$GITHUB_ENV"; fi
+            { echo "#### $m — $V"; echo '```'
+              grep -E '^   (총|장당|처리량|사용량|실행 중)|fpga_buff_|Check failed|^== (중단|실패)' \
+                "../logs/multi-$m.log" || echo "(측정값 없음)"
+              echo '```'; } >> ../logs/summary.md
+          done
+
+      # 4코어 비트스트림을 썼든 아니든 단일로 되돌린다. 단일 코어 기준값은 단일 비트스트림의 것이다.
+      - name: 비트스트림 되돌리기
+        if: always()
+        run: |
+          . "$RUNNER_TEMP/board.sh"
+          ssh board "test -x /home/xilinx/board-bitstream.sh && /home/xilinx/board-bitstream.sh single" || \
+            echo "::warning::단일 비트스트림으로 되돌리지 못했다. 재부팅하면 rc.local 이 되돌린다."
+
+      - name: 요약
+        if: always()
+        run: |
+          {
+            echo '### test-board (ZCU102)'
+            echo "- 커밋: \`$SHA\`, vta_lib: \`${VTALIB_SHA:-?}\`"
+            echo ""
+            cat logs/summary.md 2>/dev/null || echo '(요약 없음 — 실행 전에 멈췄다)'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "${FAIL:-1}" = 0 ]
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-board-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 14
+          if-no-files-found: ignore
 
   # GitLab: test-all (manual, allow_failure)
   test-all:
